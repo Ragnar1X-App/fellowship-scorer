@@ -13,17 +13,26 @@ import { getSupabaseServer } from "../../src/lib/supabaseServer.js";
 // and returns it as base64 + a guessed media type. Plain server-to-server HTTP —
 // not subject to browser CORS, not subject to robots.txt (that only applies to
 // crawler-style tools, not a normal fetch call).
-async function fetchDocumentAsBase64(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
-  const contentType = res.headers.get("content-type") || "";
-  const mediaType = contentType.includes("pdf")
-    ? "application/pdf"
-    : contentType.includes("png")
-    ? "image/png"
-    : "image/jpeg";
-  const buf = Buffer.from(await res.arrayBuffer());
-  return { base64: buf.toString("base64"), mediaType };
+async function fetchDocumentAsBase64(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+    const contentType = res.headers.get("content-type") || "";
+    const mediaType = contentType.includes("pdf")
+      ? "application/pdf"
+      : contentType.includes("png")
+      ? "image/png"
+      : "image/jpeg";
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { base64: buf.toString("base64"), mediaType };
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error(`Timed out after ${timeoutMs / 1000}s fetching ${url}`);
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export default async (req) => {
@@ -33,6 +42,7 @@ export default async (req) => {
     // student = { name, institution, marks, courseCount, courseNames, title, description,
     //             guideName, documentUrls: { endorsementGuide, endorsementHead, marksheet } }
 
+    // These are cheap/local — no need to parallelize.
     const acad = academicScore(student.marks);
     const crs = coursesScore(student.courseCount, student.courseNames);
     const inst = instituteScore(student.institution, nirfList);
@@ -46,25 +56,40 @@ export default async (req) => {
       closestMatch = sim.title;
     }
 
-    let qual = { technical: 0, scalability: 0, ethics: 0, relevance: 0, roadmap: 0, justification: "No project description." };
-    if (student.title || student.description) {
-      qual = await judgeProjectQuality(student.title, student.description);
-    }
-    const qualTotal = qual.technical + qual.scalability + qual.ethics + qual.relevance + qual.roadmap;
+    // The expensive part: previously this ran project-judging, THEN each document's
+    // fetch+extract one after another — 4 sequential Claude calls plus 3 sequential
+    // fetches, easily 30+ seconds and past Netlify's function timeout. Running all 4
+    // independent tasks concurrently instead cuts wall-clock time to roughly the
+    // slowest single call, not the sum of all of them.
+    const qualPromise =
+      student.title || student.description
+        ? judgeProjectQuality(student.title, student.description)
+        : Promise.resolve({
+            technical: 0,
+            scalability: 0,
+            ethics: 0,
+            relevance: 0,
+            roadmap: 0,
+            justification: "No project description.",
+          });
 
-    // Fetch + extract each available document for this student
     const urls = student.documentUrls || {};
     const docEntries = Object.entries(urls).filter(([, url]) => url);
-    const docs = [];
-    for (const [docType, url] of docEntries) {
+    const docPromises = docEntries.map(async ([docType, url]) => {
       try {
         const { base64, mediaType } = await fetchDocumentAsBase64(url);
         const extracted = await extractDocumentFields(base64, mediaType);
-        docs.push({ fileName: docType, docType, extracted });
+        return { fileName: docType, docType, extracted };
       } catch (err) {
-        docs.push({ fileName: docType, docType, extracted: null, error: err.message });
+        return { fileName: docType, docType, extracted: null, error: err.message };
       }
-    }
+    });
+
+    const [qualResult, ...docResults] = await Promise.all([qualPromise, ...docPromises]);
+    const qual = qualResult;
+    const docs = docResults;
+
+    const qualTotal = qual.technical + qual.scalability + qual.ethics + qual.relevance + qual.roadmap;
     const validDocs = docs.filter((d) => d.extracted && !d.extracted.parseError);
 
     let docAgg = null;

@@ -83,7 +83,16 @@ export default function App() {
               nirfList: baseData.nirfList,
             }),
           });
-          if (!res.ok) throw new Error(`Server error ${res.status}`);
+          if (!res.ok) {
+            let detail = `Server error ${res.status}`;
+            try {
+              const body = await res.json();
+              if (body.error) detail = body.error;
+            } catch {
+              /* response wasn't JSON, e.g. a raw Netlify timeout page */
+            }
+            throw new Error(detail);
+          }
           return await res.json();
         } catch (err) {
           return { name: student.name, error: err.message };
@@ -192,7 +201,9 @@ export default function App() {
                     <td>{r.institution}</td>
                     <td>{r.subtotal80 ?? "—"}</td>
                     <td>{r.documentScore ?? "—"}</td>
-                    <td style={{ fontWeight: 700 }}>{r.combinedTotal ?? (r.error ? "ERROR" : "—")}</td>
+                    <td style={{ fontWeight: 700, color: r.error ? "#c00" : "inherit" }} title={r.error || ""}>
+                      {r.combinedTotal ?? (r.error ? "ERROR (hover for reason)" : "—")}
+                    </td>
                     <td>{(r.documentFlags || []).length}</td>
                   </tr>
                 ))}
