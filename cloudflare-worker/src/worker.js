@@ -260,6 +260,26 @@ export default {
       if (url.pathname === "/process-student") return await handleProcessStudent(request, env, origin);
       if (url.pathname === "/base-data") return await handleBaseData(request, env, origin);
       if (url.pathname === "/batch-results") return await handleBatchResults(request, env, origin);
+      if (url.pathname === "/debug-env") {
+        // Never returns the actual secret values — just enough to diagnose whether
+        // they're bound at all, roughly the right length, and start with what a
+        // real key/URL of that type should look like.
+        const check = (val, expectedPrefix) => ({
+          present: !!val,
+          length: val ? val.length : 0,
+          startsCorrectly: val ? val.startsWith(expectedPrefix) : false,
+          firstChars: val ? val.slice(0, expectedPrefix.length + 4) : null,
+        });
+        return json(
+          {
+            ANTHROPIC_API_KEY: check(env.ANTHROPIC_API_KEY, "sk-ant-"),
+            SUPABASE_URL: check(env.SUPABASE_URL, "https://"),
+            SUPABASE_SERVICE_ROLE_KEY: check(env.SUPABASE_SERVICE_ROLE_KEY, "eyJ"),
+          },
+          200,
+          origin
+        );
+      }
       return json({ error: "Not found" }, 404, origin);
     } catch (err) {
       return json({ error: err.message }, 500, origin);
