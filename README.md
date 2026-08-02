@@ -77,3 +77,48 @@ error without them.
 
 Roughly $0.30–0.50 total — project-quality judging (~$0.003/student) + document extraction
 (~$0.007–0.01/document, ~3 documents/student). See conversation history for the math.
+
+## Deploy the backend to Cloudflare Workers (recommended)
+
+The backend was moved from Netlify Functions to Cloudflare Workers because Workers bill
+by CPU time, not wall-clock time — time spent waiting on document fetches or the
+Anthropic API doesn't count against the limit. This is what actually fixes the
+502/504 timeouts hit on Netlify's default function timeout.
+
+```bash
+cd cloudflare-worker
+npm install -g wrangler   # if you don't have it
+wrangler login
+npm install
+
+# Set your 3 secrets (prompts for each value, doesn't echo it back)
+wrangler secret put ANTHROPIC_API_KEY
+wrangler secret put SUPABASE_URL
+wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+
+wrangler deploy
+```
+
+This prints your live Worker URL, something like:
+```
+https://fellowship-scorer-api.your-subdomain.workers.dev
+```
+
+Then point the frontend at it: set `VITE_API_BASE_URL` to that URL in Netlify's
+environment variables (same place as your other keys), and redeploy the frontend.
+Once this is done, Netlify only needs `VITE_API_BASE_URL` — the Anthropic and Supabase
+keys live in the Worker instead.
+
+**Local testing:** `cd cloudflare-worker && npm run dev` runs the Worker locally (needs
+a `.dev.vars` file with the same 3 keys — wrangler's local equivalent of `.env`, also
+never commit it).
+
+## Alternative: keep the backend on Netlify Functions
+
+The original `netlify/functions/*.js` are still in this repo and still work — the
+shared `src/lib/` code was made portable (no `Buffer`, no `process.env` reads inside
+the library itself), but Netlify's functions still pass `process.env` explicitly, so
+nothing broke. If you'd rather not deal with two platforms, leave `VITE_API_BASE_URL`
+unset and the frontend keeps calling Netlify Functions at `/api/*` as before — just
+know you may hit the same timeout issue at higher document counts per student.
+

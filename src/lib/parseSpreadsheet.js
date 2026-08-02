@@ -47,12 +47,13 @@ export async function parseWorkbookFile(file) {
   }
 
   function commentFlagAt(rowIdx) {
-    if (colMap.comments < 0) return "none";
+    if (colMap.comments < 0) return { flag: "none", text: "" };
     const sheetRow = rowNumbers[rowIdx];
     const addr = XLSX.utils.encode_cell({ r: sheetRow - 1, c: colMap.comments });
     const cell = ws[addr];
     const rgb = cell && cell.s && cell.s.fgColor && cell.s.fgColor.rgb;
-    return classifyFillColor(rgb);
+    const text = cell ? String(cell.v || "") : "";
+    return { flag: classifyFillColor(rgb), text };
   }
 
   const get = (row, field) => {
@@ -60,22 +61,60 @@ export async function parseWorkbookFile(file) {
     return i >= 0 && i !== undefined ? row[i] : "";
   };
 
-  const students = rows.map((row, idx) => ({
-    name: get(row, "name") || `Row ${idx + 2}`,
-    institution: get(row, "institution") || "",
-    marks: get(row, "marks"),
-    courseCount: get(row, "courseCount"),
-    courseNames: get(row, "courseNames"),
-    title: (get(row, "title") || "").toString(),
-    description: (get(row, "description") || "").toString(),
-    guideName: get(row, "guideName") || "",
-    commentFlag: commentFlagAt(idx),
-    documentUrls: {
-      endorsementGuide: urlAt(idx, colMap.endorsementGuideUrl),
-      endorsementHead: urlAt(idx, colMap.endorsementHeadUrl),
-      marksheet: urlAt(idx, colMap.marksheetUrl),
-    },
-  }));
+  const students = rows.map((row, idx) => {
+    const comment = commentFlagAt(idx);
+    return {
+      name: get(row, "name") || `Row ${idx + 2}`,
+      institution: get(row, "institution") || "",
+      marks: get(row, "marks"),
+      courseCount: get(row, "courseCount"),
+      courseNames: get(row, "courseNames"),
+      title: (get(row, "title") || "").toString(),
+      description: (get(row, "description") || "").toString(),
+      guideName: get(row, "guideName") || "",
+      commentFlag: comment.flag,
+      commentText: comment.text,
+      documentUrls: {
+        endorsementGuide: urlAt(idx, colMap.endorsementGuideUrl),
+        endorsementHead: urlAt(idx, colMap.endorsementHeadUrl),
+        marksheet: urlAt(idx, colMap.marksheetUrl),
+      },
+    };
+  });
 
   return { headers, colMap, students };
+}
+
+export async function parseBaseProjectsFile(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  const hdrs = json[0].map((h) => (h || "").toString().toLowerCase());
+  const titleIdx = hdrs.findIndex((h) => h.includes("project title"));
+  const descIdx = hdrs.findIndex((h) => h.includes("project description"));
+  if (titleIdx === -1 || descIdx === -1) {
+    throw new Error("Couldn't find 'Project Title' / 'Project Description' columns in that file.");
+  }
+  return json
+    .slice(1)
+    .filter((r) => r[titleIdx] && r[descIdx])
+    .map((r) => ({ t: String(r[titleIdx]).trim(), d: String(r[descIdx]).trim() }));
+}
+
+export async function parseNirfFile(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  const hdrs = json[0].map((h) => (h || "").toString().toLowerCase());
+  const nameIdx = hdrs.findIndex((h) => h.includes("name"));
+  const rankIdx = hdrs.findIndex((h) => h.includes("nirf") || h.includes("rank"));
+  if (nameIdx === -1 || rankIdx === -1) {
+    throw new Error("Couldn't find institute name / NIRF rank columns in that file.");
+  }
+  return json
+    .slice(1)
+    .filter((r) => r[nameIdx])
+    .map((r) => ({ n: String(r[nameIdx]).trim(), r: r[rankIdx] }));
 }

@@ -1,15 +1,16 @@
-// Server-side only. Never import this into frontend code — ANTHROPIC_API_KEY
-// must stay in Netlify Functions' environment, never shipped to the browser.
+// Portable across Netlify Functions (Node) and Cloudflare Workers — takes the API key
+// as a parameter instead of reading process.env directly, since Workers don't have
+// process.env and pass secrets via the `env` binding instead.
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-6";
 
-async function callClaude(body) {
+async function callClaude(body, apiKey) {
   const response = await fetch(API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
@@ -28,7 +29,7 @@ function extractJson(data) {
   return JSON.parse(raw);
 }
 
-export async function judgeProjectQuality(title, description) {
+export async function judgeProjectQuality(title, description, apiKey) {
   const prompt = `You are an expert evaluator scoring an undergraduate AI project proposal for a national government AI fellowship. Score the project on these 5 dimensions, each 0-3 points (0=absent/poor, 1=weak, 2=adequate, 3=strong):
 
 1. technical - Technical Soundness / appropriate AI usage
@@ -43,11 +44,14 @@ Project Description: ${description}
 Respond with ONLY valid JSON, no markdown fences, no other text:
 {"technical":0,"scalability":0,"ethics":0,"relevance":0,"roadmap":0,"justification":"one short sentence"}`;
 
-  const data = await callClaude({
-    model: MODEL,
-    max_tokens: 1000,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const data = await callClaude(
+    {
+      model: MODEL,
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }],
+    },
+    apiKey
+  );
 
   try {
     const parsed = extractJson(data);
@@ -65,7 +69,7 @@ Respond with ONLY valid JSON, no markdown fences, no other text:
   }
 }
 
-export async function extractDocumentFields(base64Data, mediaType) {
+export async function extractDocumentFields(base64Data, mediaType, apiKey) {
   const prompt = `You are reviewing a document submitted as part of an Indian government AI fellowship application. Read it carefully and extract:
 
 IDENTIFYING FIELDS (exact as printed, or null):
@@ -84,21 +88,24 @@ QUALITY / ELIGIBILITY CHECKLIST (true/false/null):
 Respond with ONLY valid JSON, no markdown fences:
 {"studentName":null,"printedId":null,"idType":null,"instituteName":null,"guideName":null,"guideDesignation":null,"projectTitle":null,"cgpaOrLatestMarks":null,"docType":"other","isAttested":null,"hasOfficialLetterhead":null,"isStampedAndSigned":null,"semestersShown":null,"hasAcademicBacklog":null,"isLegible":null,"courseSubjects":[],"notes":""}`;
 
-  const data = await callClaude({
-    model: MODEL,
-    max_tokens: 1500,
-    messages: [
-      {
-        role: "user",
-        content: [
-          mediaType === "application/pdf"
-            ? { type: "document", source: { type: "base64", media_type: mediaType, data: base64Data } }
-            : { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
-  });
+  const data = await callClaude(
+    {
+      model: MODEL,
+      max_tokens: 1500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            mediaType === "application/pdf"
+              ? { type: "document", source: { type: "base64", media_type: mediaType, data: base64Data } }
+              : { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    },
+    apiKey
+  );
 
   try {
     return extractJson(data);

@@ -1,0 +1,7 @@
+name = "fellowship-scorer-api"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+
+# Secrets (ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) are NOT set here —
+# set them with: wrangler secret put ANTHROPIC_API_KEY  (etc.)
+# Never commit real secret values into this file.

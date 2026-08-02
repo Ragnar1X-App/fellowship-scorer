@@ -1,7 +1,7 @@
 import { getSupabaseServer } from "../../src/lib/supabaseServer.js";
 
 export default async (req) => {
-  const supabase = getSupabaseServer();
+  const supabase = getSupabaseServer(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (req.method === "GET") {
     const [{ data: projects }, { data: nirf }] = await Promise.all([

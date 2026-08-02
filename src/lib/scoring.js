@@ -59,6 +59,9 @@ function cosineSim(vecA, vecB) {
 }
 
 export function maxSimilarityAgainstCorpus(newText, corpusDocs) {
+  if (!corpusDocs || corpusDocs.length === 0) {
+    return { sim: null, title: null, noCorpus: true };
+  }
   const newTokens = tokenize(newText);
   const allTokenSets = corpusDocs.map((d) => tokenize(d.t + " " + d.d));
   const idf = buildCorpusModel([...allTokenSets, newTokens]);
@@ -73,6 +76,9 @@ export function maxSimilarityAgainstCorpus(newText, corpusDocs) {
 
 // Your custom point bands (updated from the original rubric)
 export function uniquenessScoreFromSimilarity(simFraction) {
+  if (simFraction === null || simFraction === undefined) {
+    return { score: 0, band: "N/A — base dataset is empty, cannot check uniqueness", noCorpus: true };
+  }
   const pct = simFraction * 100;
   if (pct <= 20) return { score: 30, band: "0-20% similar" };
   if (pct <= 40) return { score: 25, band: "21-40% similar" };

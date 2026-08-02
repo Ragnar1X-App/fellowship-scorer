@@ -52,7 +52,7 @@ export default async (req) => {
     if (student.title || student.description) {
       const sim = maxSimilarityAgainstCorpus(`${student.title} ${student.description}`, baseProjects);
       uniq = uniquenessScoreFromSimilarity(sim.sim);
-      uniq.simPct = Math.round(sim.sim * 100);
+      uniq.simPct = sim.sim === null ? null : Math.round(sim.sim * 100);
       closestMatch = sim.title;
     }
 
@@ -63,7 +63,7 @@ export default async (req) => {
     // slowest single call, not the sum of all of them.
     const qualPromise =
       student.title || student.description
-        ? judgeProjectQuality(student.title, student.description)
+        ? judgeProjectQuality(student.title, student.description, process.env.ANTHROPIC_API_KEY)
         : Promise.resolve({
             technical: 0,
             scalability: 0,
@@ -78,7 +78,7 @@ export default async (req) => {
     const docPromises = docEntries.map(async ([docType, url]) => {
       try {
         const { base64, mediaType } = await fetchDocumentAsBase64(url);
-        const extracted = await extractDocumentFields(base64, mediaType);
+        const extracted = await extractDocumentFields(base64, mediaType, process.env.ANTHROPIC_API_KEY);
         return { fileName: docType, docType, extracted };
       } catch (err) {
         return { fileName: docType, docType, extracted: null, error: err.message };
@@ -126,7 +126,7 @@ export default async (req) => {
     };
 
     // Persist to Supabase
-    const supabase = getSupabaseServer();
+    const supabase = getSupabaseServer(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     await supabase.from("scores").upsert(
       {
         batch_id: batchId,

@@ -1,7 +1,7 @@
 import { getSupabaseServer } from "../../src/lib/supabaseServer.js";
 
 export default async (req) => {
-  const supabase = getSupabaseServer();
+  const supabase = getSupabaseServer(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const url = new URL(req.url);
   const batchId = url.searchParams.get("batchId");
   if (!batchId) return new Response(JSON.stringify({ error: "batchId required" }), { status: 400 });
