@@ -3,11 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 // Service role key — full access, server-side only, never exposed to the browser.
 // Portable across Netlify Functions and Cloudflare Workers — takes credentials as
 // parameters instead of reading process.env, since Workers don't have process.env.
-//
-// NOTE: cloudflare-worker/src/lib/supabaseServer.js is a COPY of this file, not an
-// import of it. Wrangler's bundler can't resolve npm packages (@supabase/supabase-js)
-// from files living outside the Worker's own directory tree — if you edit this file,
-// mirror the change there too.
 export function getSupabaseServer(url, serviceRoleKey) {
   return createClient(url, serviceRoleKey);
 }

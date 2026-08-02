@@ -7,7 +7,7 @@ import {
   uniquenessScoreFromSimilarity,
   aggregateStudentDocuments,
 } from "../../src/lib/scoring.js";
-import { getSupabaseServer } from "../../src/lib/supabaseServer.js";
+import { getSupabaseServer } from "./lib/supabaseServer.js";
 
 function corsHeaders(origin) {
   return {
