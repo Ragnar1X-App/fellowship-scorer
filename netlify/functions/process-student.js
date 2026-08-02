@@ -127,7 +127,12 @@ export default async (req) => {
 
     // Persist to Supabase
     const supabase = getSupabaseServer(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    await supabase.from("scores").upsert(
+
+    // The scores table has a foreign key on batch_id -> batches(id). Make sure that
+    // row exists first, or every score write fails silently.
+    await supabase.from("batches").upsert({ id: batchId }, { onConflict: "id", ignoreDuplicates: true });
+
+    const { error: saveError } = await supabase.from("scores").upsert(
       {
         batch_id: batchId,
         student_name: student.name,
@@ -138,6 +143,9 @@ export default async (req) => {
       },
       { onConflict: "batch_id,student_name" }
     );
+    if (saveError) {
+      result.saveWarning = "Scored successfully but failed to save to Supabase: " + saveError.message;
+    }
 
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   } catch (err) {

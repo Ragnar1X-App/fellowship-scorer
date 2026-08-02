@@ -88,7 +88,7 @@ async function handleProcessStudent(req, env, origin) {
     closestMatch = sim.title;
   }
 
-  const qualPromise =
+  const qualPromise = (
     student.title || student.description
       ? judgeProjectQuality(student.title, student.description, env.ANTHROPIC_API_KEY)
       : Promise.resolve({
@@ -98,7 +98,15 @@ async function handleProcessStudent(req, env, origin) {
           relevance: 0,
           roadmap: 0,
           justification: "No project description.",
-        });
+        })
+  ).catch((err) => ({
+    technical: 0,
+    scalability: 0,
+    ethics: 0,
+    relevance: 0,
+    roadmap: 0,
+    justification: "AI judging failed: " + err.message,
+  }));
 
   const urls = student.documentUrls || {};
   const docEntries = Object.entries(urls).filter(([, url]) => url);
@@ -150,7 +158,13 @@ async function handleProcessStudent(req, env, origin) {
   };
 
   const supabase = getSupabaseServer(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  await supabase.from("scores").upsert(
+
+  // The scores table has a foreign key on batch_id -> batches(id). Make sure that
+  // row exists first, or every score write fails silently (upsert doesn't throw
+  // by default with the JS client, it just returns {error} unchecked).
+  await supabase.from("batches").upsert({ id: batchId }, { onConflict: "id", ignoreDuplicates: true });
+
+  const { error: saveError } = await supabase.from("scores").upsert(
     {
       batch_id: batchId,
       student_name: student.name,
@@ -161,6 +175,9 @@ async function handleProcessStudent(req, env, origin) {
     },
     { onConflict: "batch_id,student_name" }
   );
+  if (saveError) {
+    result.saveWarning = "Scored successfully but failed to save to Supabase: " + saveError.message;
+  }
 
   return json(result, 200, origin);
 }
