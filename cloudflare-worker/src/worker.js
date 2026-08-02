@@ -40,8 +40,18 @@ async function fetchDocumentAsBase64(url, timeoutMs = 20000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        // Some government portals reject requests that don't look like a real
+        // browser — no User-Agent, no Accept header — often with a silent
+        // connection reset rather than a clean HTTP error.
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Accept: "application/pdf,image/*,*/*",
+      },
+    });
+    if (!res.ok) throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
     const contentType = res.headers.get("content-type") || "";
     const mediaType = contentType.includes("pdf")
       ? "application/pdf"
@@ -52,7 +62,10 @@ async function fetchDocumentAsBase64(url, timeoutMs = 20000) {
     return { base64: arrayBufferToBase64(buf), mediaType };
   } catch (err) {
     if (err.name === "AbortError") throw new Error(`Timed out after ${timeoutMs / 1000}s fetching ${url}`);
-    throw err;
+    // Surface the underlying cause (DNS/TLS/connection-level detail) if present —
+    // generic "fetch failed" messages usually have a more specific .cause underneath.
+    const causeDetail = err.cause ? ` (cause: ${err.cause.message || err.cause})` : "";
+    throw new Error(`${err.name || "Error"}: ${err.message}${causeDetail}`);
   } finally {
     clearTimeout(timeout);
   }
