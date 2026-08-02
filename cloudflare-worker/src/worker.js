@@ -36,38 +36,55 @@ function arrayBufferToBase64(buf) {
   return btoa(binary);
 }
 
-async function fetchDocumentAsBase64(url, timeoutMs = 20000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        // Some government portals reject requests that don't look like a real
-        // browser — no User-Agent, no Accept header — often with a silent
-        // connection reset rather than a clean HTTP error.
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        Accept: "application/pdf,image/*,*/*",
-      },
-    });
-    if (!res.ok) throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
-    const contentType = res.headers.get("content-type") || "";
-    const mediaType = contentType.includes("pdf")
-      ? "application/pdf"
-      : contentType.includes("png")
-      ? "image/png"
-      : "image/jpeg";
-    const buf = await res.arrayBuffer();
-    return { base64: arrayBufferToBase64(buf), mediaType };
-  } catch (err) {
-    if (err.name === "AbortError") throw new Error(`Timed out after ${timeoutMs / 1000}s fetching ${url}`);
-    // Surface the underlying cause (DNS/TLS/connection-level detail) if present —
-    // generic "fetch failed" messages usually have a more specific .cause underneath.
-    const causeDetail = err.cause ? ` (cause: ${err.cause.message || err.cause})` : "";
-    throw new Error(`${err.name || "Error"}: ${err.message}${causeDetail}`);
-  } finally {
-    clearTimeout(timeout);
+async function fetchDocumentAsBase64(url, timeoutMs = 12000, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          Accept: "application/pdf,image/*,*/*",
+        },
+      });
+      if (!res.ok) {
+        // 522/524/502/503/504 are transient — origin overloaded or slow to respond,
+        // not a permanent rejection. Worth retrying with a short backoff.
+        const transient = [502, 503, 504, 522, 524].includes(res.status);
+        if (transient && attempt < retries) {
+          clearTimeout(timeout);
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          continue;
+        }
+        throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
+      }
+      const contentType = res.headers.get("content-type") || "";
+      const mediaType = contentType.includes("pdf")
+        ? "application/pdf"
+        : contentType.includes("png")
+        ? "image/png"
+        : "image/jpeg";
+      const buf = await res.arrayBuffer();
+      return { base64: arrayBufferToBase64(buf), mediaType };
+    } catch (err) {
+      if (err.name === "AbortError" && attempt < retries) {
+        clearTimeout(timeout);
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      if (err.name === "AbortError") throw new Error(`Timed out after ${timeoutMs / 1000}s fetching ${url} (after ${attempt + 1} attempts)`);
+      const causeDetail = err.cause ? ` (cause: ${err.cause.message || err.cause})` : "";
+      if (attempt < retries) {
+        clearTimeout(timeout);
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      throw new Error(`${err.name || "Error"}: ${err.message}${causeDetail} (after ${attempt + 1} attempts)`);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 
